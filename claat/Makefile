@@ -46,7 +46,7 @@ release: $(RELEASES)
 
 test: .test
 .test: $(SRCS)
-	go test ./... && touch .test
+	go test ../... && touch .test
 
 lint: .lint
 .lint: $(SRCS)
