@@ -1,0 +1,115 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>How to Write Another Codelab</title>
+  <script src="../../bower_components/webcomponentsjs/webcomponents-lite.js"></script>
+  <link rel="import" href="../../elements/codelab.html">
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <style is="custom-style">
+    body {
+      font-family: "Roboto",sans-serif;
+      background: var(--google-codelab-background, #F8F9FA);
+    }
+  </style>
+  
+</head>
+<body unresolved class="fullbleed">
+
+  <google-codelab title="How to Write Another Codelab"
+                  environment="web"
+                  feedback-link="https://zarin.io">
+    
+      <google-codelab-step label="Overview" duration="1">
+        <h2 class="checklist">What You&#39;ll Learn</h2>
+<ul class="checklist">
+<li>how to set the amount of time each slide will take to finish</li>
+<li>how to include code snippets</li>
+<li>how to hyperlink items</li>
+<li>how to include images</li>
+<li>other stuff</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Setting Duration" duration="2">
+        <p>To indicate how long each slide will take to go through, set the <code>Duration</code> under each Heading 2 (i.e. <code>##</code>) to an integer.<br>The integers refer to minutes. If you set <code>Duration: 4</code> then a particular slide will take 4 minutes to complete.</p>
+<p>The total time will automatically be calculated for you and will be displayed on the codelab once you create it.</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Code Snippets" duration="3">
+        <p>To include code snippets you can do a few things.</p>
+<ul>
+<li>Inline highlighting can be done using the tiny tick mark on your keyboard: &#34;`&#34;</li>
+<li>Embedded code</li>
+</ul>
+<h2>JavaScript</h2>
+<pre><code>{ 
+  key1: &#34;string&#34;, 
+  key2: integer,
+  key3: &#34;string&#34;
+}
+</code></pre>
+<h2>Java</h2>
+<pre><code>for (statement 1; statement 2; statement 3) {
+  // code block to be executed
+}
+</code></pre>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Hyperlinking and Embedded Images" duration="0">
+        <h2>Hyperlinking</h2>
+<p><a href="https://www.youtube.com/user/iamhalsey/playlists" target="_blank">Youtube - Halsey Playlists</a></p>
+<h2>Images</h2>
+<p><img alt="alt-text-here" src="img/7d7408824e1ed9e.jpg"></p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Other Stuff" duration="1">
+        <p>Checkout the official documentation here: <a href="https://github.com/googlecodelabs/tools/blob/master/FORMAT-GUIDE.md" target="_blank">Codelab Formatting Guide</a></p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+    ga('create', 'UA-49880327-14', 'auto');
+
+    (function() {
+      var gaCodelab = '';
+      if (gaCodelab) {
+        ga('create', gaCodelab, 'auto', {name: 'codelab'});
+      }
+
+      var gaView;
+      var parts = location.search.substring(1).split('&');
+      for (var i = 0; i < parts.length; i++) {
+        var param = parts[i].split('=');
+        if (param[0] === 'viewga') {
+          gaView = param[1];
+          break;
+        }
+      }
+      if (gaView && gaView !== gaCodelab) {
+        ga('create', gaView, 'auto', {name: 'view'});
+      }
+    })();
+  </script>
+
+</body>
+</html>

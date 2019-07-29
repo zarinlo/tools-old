@@ -1,0 +1,24 @@
+{
+  "environment": "web",
+  "source": "how-to-write-a-codelab.md",
+  "format": "html",
+  "prefix": "../../",
+  "mainga": "UA-49880327-14",
+  "updated": "2019-07-11T01:03:49-04:00",
+  "id": "how-to-write-a-codelab",
+  "duration": 7,
+  "title": "How to Write a Codelab",
+  "summary": "How to Write a Codelab",
+  "theme": "",
+  "status": [
+    "published"
+  ],
+  "category": [
+    "sample"
+  ],
+  "tags": [
+    "medium"
+  ],
+  "feedback": "https://zarin.io",
+  "url": "how-to-write-a-codelab"
+}
