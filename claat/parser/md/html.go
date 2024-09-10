@@ -40,6 +40,7 @@ func isHeader(hn *html.Node) bool {
 	return ok
 }
 
+// TODO rename, it only captures some meta. Maybe redo the meta system?
 func isMeta(hn *html.Node) bool {
 	elem := strings.ToLower(hn.Data)
 	return strings.HasPrefix(elem, metaDuration+metaSep) || strings.HasPrefix(elem, metaEnvironment+metaSep)
@@ -48,6 +49,15 @@ func isMeta(hn *html.Node) bool {
 func isBold(hn *html.Node) bool {
 	if hn.Type == html.TextNode {
 		hn = hn.Parent
+	} else if hn.DataAtom == atom.Code {
+		// Look up as many as 2 levels, to handle the case of e.g. <bold><em><code>
+		for i := 0; i < 2; i++ {
+			hn = hn.Parent
+			if hn.DataAtom == atom.Strong || hn.DataAtom == atom.B {
+				return true
+			}
+		}
+		return false
 	}
 	return hn.DataAtom == atom.Strong ||
 		hn.DataAtom == atom.B
@@ -56,28 +66,72 @@ func isBold(hn *html.Node) bool {
 func isItalic(hn *html.Node) bool {
 	if hn.Type == html.TextNode {
 		hn = hn.Parent
+	} else if hn.DataAtom == atom.Code {
+		// Look up as many as 2 levels, to handle the case of e.g. <em><bold><code>
+		for i := 0; i < 2; i++ {
+			hn = hn.Parent
+			if hn.DataAtom == atom.Em || hn.DataAtom == atom.I {
+				return true
+			}
+		}
+		return false
 	}
 	return hn.DataAtom == atom.Em ||
 		hn.DataAtom == atom.I
+}
+
+// This is different to calling isBold and isItalic separately as we must look
+// up an extra level in the tree
+func isBoldAndItalic(hn *html.Node) bool {
+	if hn.Parent == nil || hn.Parent.Parent == nil {
+		return false
+	}
+	if hn.Type == html.TextNode {
+		hn = hn.Parent
+	}
+	return (isItalic(hn) && isBold(hn.Parent)) || (isItalic(hn.Parent) && isBold(hn))
+
 }
 
 func isConsole(hn *html.Node) bool {
 	if hn.Type == html.TextNode {
 		hn = hn.Parent
 	}
-	return hn.DataAtom == atom.Code && hn.Parent.DataAtom != atom.Pre
+	if hn.DataAtom == atom.Code {
+		for _, a := range hn.Attr {
+			if a.Key == "class" && a.Val == "language-console" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isCode(hn *html.Node) bool {
 	if hn.Type == html.TextNode {
 		hn = hn.Parent
 	}
-	return hn.DataAtom == atom.Code && hn.Parent.DataAtom == atom.Pre
+	return hn.DataAtom == atom.Code && !isConsole(hn)
 }
 
 func isButton(hn *html.Node) bool {
-	// TODO: implements
-	return false
+	return hn.DataAtom == atom.Button
+}
+
+func isAside(hn *html.Node) bool {
+	return hn.DataAtom == atom.Aside
+}
+
+func isNewAside(hn *html.Node) bool {
+	if hn.DataAtom != atom.Blockquote ||
+		hn.FirstChild == nil ||
+		hn.FirstChild.NextSibling == nil ||
+		hn.FirstChild.NextSibling.FirstChild == nil {
+		return false
+	}
+
+	asideText := strings.ToLower(hn.FirstChild.NextSibling.FirstChild.Data)
+	return strings.HasPrefix(asideText, "aside positive") || strings.HasPrefix(asideText, "aside negative")
 }
 
 func isInfobox(hn *html.Node) bool {
@@ -95,21 +149,37 @@ func isInfoboxNegative(hn *html.Node) bool {
 }
 
 func isSurvey(hn *html.Node) bool {
-	if hn.DataAtom != atom.Dt {
+	if hn.DataAtom != atom.Form {
 		return false
 	}
-	return strings.ToLower(hn.FirstChild.Data) == "survey"
+	if findAtom(hn, atom.Name) == nil {
+		return false
+	}
+	if len(findChildAtoms(hn, atom.Input)) == 0 {
+		return false
+	}
+	return true
 }
 
+// TODO Write an explanation for why the countTwo checks are necessary.
 func isTable(hn *html.Node) bool {
 	if hn.DataAtom != atom.Table {
 		return false
 	}
-	return countTwo(hn, atom.Tr) > 1 || countTwo(hn, atom.Td) > 1
+	// TODO if =1 is fine, can we sub findAtom?
+	return countTwo(hn, atom.Tr) >= 1 || countTwo(hn, atom.Td) >= 1
 }
 
 func isList(hn *html.Node) bool {
 	return hn.DataAtom == atom.Ul || hn.DataAtom == atom.Ol
+}
+
+func isYoutube(hn *html.Node) bool {
+	return hn.DataAtom == atom.Video
+}
+
+func isFragmentImport(hn *html.Node) bool {
+	return hn.DataAtom == 0 && strings.HasPrefix(hn.Data, convertedImportsDataPrefix)
 }
 
 // countTwo starts counting the number of a Atom children in hn.
@@ -155,6 +225,7 @@ func findAtom(root *html.Node, a atom.Atom) *html.Node {
 	return nil
 }
 
+// TODO reuse code with findAtom?
 func findChildAtoms(root *html.Node, a atom.Atom) []*html.Node {
 	var nodes []*html.Node
 	for hn := root.FirstChild; hn != nil; hn = hn.NextSibling {
@@ -166,15 +237,23 @@ func findChildAtoms(root *html.Node, a atom.Atom) []*html.Node {
 	return nodes
 }
 
-// findParent is like findAtom but search is in the opposite direction.
-// It is faster to look for parent than child lookup in findAtom.
-func findParent(root *html.Node, a atom.Atom) *html.Node {
-	if root.DataAtom == a {
-		return root
+type considerSelf int
+
+const (
+	doNotConsiderSelf considerSelf = iota
+	doConsiderSelf
+)
+
+// findNearestAncestor finds the nearest ancestor of the given node of any of the given atoms.
+// A pointer to the ancestor is returned, or nil if none are found.
+// If doConsiderSelf is passed, the given node itself counts as an ancestor for our purposes.
+func findNearestAncestor(n *html.Node, atoms map[atom.Atom]struct{}, cs considerSelf) *html.Node {
+	if _, ok := atoms[n.DataAtom]; cs == doConsiderSelf && ok {
+		return n
 	}
-	for c := root.Parent; c != nil; c = c.Parent {
-		if c.DataAtom == a {
-			return c
+	for p := n.Parent; p != nil; p = p.Parent {
+		if _, ok := atoms[p.DataAtom]; ok {
+			return p
 		}
 	}
 	return nil
@@ -192,35 +271,38 @@ var blockParents = map[atom.Atom]struct{}{
 	atom.Div: {},
 }
 
-// findBlockParent looks up nearest block parent node of hn.
+// findNearestBlockAncestor finds the nearest ancestor node of a block atom.
 // For instance, block parent of "text" in <ul><li>text</li></ul> is <li>,
 // while block parent of "text" in <p><span>text</span></p> is <p>.
-func findBlockParent(hn *html.Node) *html.Node {
-	for p := hn.Parent; p != nil; p = p.Parent {
-		if _, ok := blockParents[p.DataAtom]; ok {
-			return p
-		}
-	}
-	return nil
+// The node passed in itself is never considered.
+// A pointer to the ancestor is returned, or nil if none are found.
+func findNearestBlockAncestor(n *html.Node) *html.Node {
+	return findNearestAncestor(n, blockParents, doNotConsiderSelf)
 }
 
-// nodeAttr returns node attribute value of the key name.
-// Attribute keys are case insensitive.
-func nodeAttr(n *html.Node, name string) string {
-	name = strings.ToLower(name)
-	for _, a := range n.Attr {
-		if strings.ToLower(a.Key) == name {
-			return a.Val
+// nodeAttr checks the given node's HTML attributes for the given key.
+// The corresponding value is returned, or the empty string if the key is not found.
+// Keys are case insensitive.
+func nodeAttr(n *html.Node, key string) string {
+	key = strings.ToLower(key)
+	for _, attr := range n.Attr {
+		if strings.ToLower(attr.Key) == key {
+			return attr.Val
 		}
 	}
 	return ""
 }
 
+// TODO divide into smaller functions
+// TODO redo comment, more than just text nodes are handled and atom.A
+// TODO should we really have trim?
+// TODO part of why this is weird is because the processing is split across root and child nodes. could restructure
 // stringifyNode extracts and concatenates all text nodes starting with root.
 // Line breaks are inserted at <br> and any non-<span> elements.
 func stringifyNode(root *html.Node, trim bool) string {
 	if root.Type == html.TextNode {
 		s := textCleaner.Replace(root.Data)
+		s = strings.Replace(s, "\n", " ", -1)
 		if !trim {
 			return s
 		}

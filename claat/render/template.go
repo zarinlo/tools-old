@@ -16,30 +16,34 @@ package render
 
 import (
 	"fmt"
-	htmlTemplate "html/template"
 	"io"
 	"io/ioutil"
 	"path/filepath"
 	"sort"
-	textTemplate "text/template"
+	"strconv"
+	"strings"
 	"time"
 
+	htmlTemplate "html/template"
+	textTemplate "text/template"
+
 	mdParse "github.com/googlecodelabs/tools/claat/parser/md"
-
-	"strings"
-
 	"github.com/googlecodelabs/tools/claat/types"
+
+	_ "embed" // embeding template files
 )
 
 // Context is a template context during execution.
 type Context struct {
-	Env      string
-	Prefix   string
-	GlobalGA string
-	Meta     *types.Meta
-	Steps    []*types.Step
-	Updated  string
-	Extra    map[string]string // Extra variables passed from the command line.
+	Env       string
+	Prefix    string
+	GlobalGA  string
+	GlobalGA4 string
+	Format    string
+	Meta      *types.Meta
+	Steps     []*types.Step
+	Updated   string
+	Extra     map[string]string // Extra variables passed from the command line.
 }
 
 // Execute renders a template of the fmt format into w.
@@ -101,6 +105,13 @@ var funcMap = map[string]interface{}{
 		res += kvLine(mdParse.MetaTags, strings.Join(meta.Tags, ","))
 		res += kvLine(mdParse.MetaFeedbackLink, meta.Feedback)
 		res += kvLine(mdParse.MetaAnalyticsAccount, meta.GA)
+		res += kvLine(mdParse.MetaAnalyticsGa4Account, meta.GA4)
+		res += kvLine(mdParse.MetaSource, meta.Source)
+		res += kvLine(mdParse.MetaDuration, strconv.Itoa(meta.Duration))
+
+		for k, v := range meta.Extra {
+			res += kvLine(k, v)
+		}
 
 		return res
 	},
@@ -135,12 +146,19 @@ var funcMap = map[string]interface{}{
 	},
 }
 
-//go:generate go run gen-tmpldata.go
-
 type template struct {
 	bytes []byte
 	html  bool
 }
+
+//go:embed template.html
+var newHTMLTemplate []byte
+
+//go:embed template.md
+var newMDTemplate []byte
+
+//go:embed template-offline.html
+var newOfflineTemplate []byte
 
 // parseTemplate parses template name defined either in tmpldata
 // or a local file.
@@ -148,8 +166,23 @@ type template struct {
 // A local file template is parsed as HTML if file extension is ".html",
 // text otherwise.
 func parseTemplate(name string, fmap map[string]interface{}) (executer, error) {
-	tmpl := tmpldata[name] // defined in pre-generated tmpldata.go
-	if tmpl == nil {
+	var tmpl *template
+	switch name {
+	case "html":
+		tmpl = &template{
+			bytes: newHTMLTemplate,
+			html:  true,
+		}
+	case "md":
+		tmpl = &template{
+			bytes: newMDTemplate,
+		}
+	case "offline":
+		tmpl = &template{
+			bytes: newOfflineTemplate,
+			html:  true,
+		}
+	default:
 		// TODO: add templates in-mem caching
 		var err error
 		if tmpl, err = readTemplate(name); err != nil {

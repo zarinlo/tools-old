@@ -18,21 +18,24 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/googlecodelabs/tools/claat/nodes"
 	"github.com/googlecodelabs/tools/claat/types"
 )
 
 func TestExecuteBuiltin(t *testing.T) {
 	step := &types.Step{
 		Title:   "Test step",
-		Content: types.NewListNode(types.NewTextNode("text")),
+		Content: nodes.NewListNode(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "text"})),
 	}
-	ctx := &Context{
+	data := &struct {
+		Context
+	}{Context: Context{
 		Meta:  &types.Meta{},
 		Steps: []*types.Step{step},
-	}
+	}}
 	for _, f := range []string{"html", "md"} {
 		var buf bytes.Buffer
-		if err := Execute(&buf, f, ctx); err != nil {
+		if err := Execute(&buf, f, data); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
 	}

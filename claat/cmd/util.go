@@ -1,4 +1,4 @@
-// Copyright 2018 Google Inc. All Rights Reserved.
+// Copyright 2018-2019 Google LLC. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@
 package cmd
 
 import (
+	"path/filepath"
+
+	"github.com/googlecodelabs/tools/claat/types"
 
 	// allow parsers to register themselves
 	_ "github.com/googlecodelabs/tools/claat/parser/gdoc"
@@ -27,9 +30,6 @@ import (
 )
 
 const (
-	// imgDirname is where a codelab images are stored,
-	// relative to the codelab dir.
-	imgDirname = "img"
 	// metaFilename is codelab metadata file.
 	metaFilename = "codelab.json"
 	// stdout is a special value for -o cli arg to identify stdout writer.
@@ -43,4 +43,10 @@ const (
 // isStdout reports whether filename is stdout.
 func isStdout(filename string) bool {
 	return filename == stdout
+}
+
+// codelabDir returns codelab root directory.
+// The base argument is codelab parent directory.
+func codelabDir(base string, m *types.Meta) string {
+	return filepath.Join(base, m.ID)
 }

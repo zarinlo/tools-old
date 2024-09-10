@@ -1,4 +1,4 @@
-// Copyright 2016 Google Inc. All Rights Reserved.
+// Copyright 2016-2019 Google LLC. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -24,6 +26,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/googlecodelabs/tools/claat/fetch"
 	"github.com/googlecodelabs/tools/claat/render"
 	"github.com/googlecodelabs/tools/claat/types"
 	"github.com/googlecodelabs/tools/claat/util"
@@ -41,6 +44,8 @@ type CmdExportOptions struct {
 	GlobalGA string
 	// Output is the output directory, or "-" for stdout.
 	Output string
+	// PassMetadata are the extra metadata fields to pass along.
+	PassMetadata map[string]bool
 	// Prefix is a URL prefix to prepend when using HTML format.
 	Prefix string
 	// Srcs is the sources to export codelabs from.
@@ -65,7 +70,7 @@ func CmdExport(opts CmdExportOptions) int {
 	ch := make(chan *result, len(srcs))
 	for _, src := range srcs {
 		go func(src string) {
-			meta, err := exportCodelab(src, opts)
+			meta, err := ExportCodelab(src, nil, opts)
 			ch <- &result{src, meta, err}
 		}(src)
 	}
@@ -81,7 +86,7 @@ func CmdExport(opts CmdExportOptions) int {
 	return exitCode
 }
 
-// exportCodelab fetches codelab src from either local disk or remote,
+// ExportCodelab fetches codelab src from either local disk or remote,
 // parses and stores the results on disk, in a dir ancestored by output.
 //
 // Stored results include codelab content formatted in tmplout, its assets
@@ -90,22 +95,46 @@ func CmdExport(opts CmdExportOptions) int {
 // There's a special case where basedir has a value of "-", in which
 // nothing is stored on disk and the only output, codelab formatted content,
 // is printed to stdout.
-func exportCodelab(src string, opts CmdExportOptions) (*types.Meta, error) {
-	clab, err := slurpCodelab(src, opts.AuthToken)
+//
+// An alternate http.RoundTripper may be specified if desired. Leave null for default.
+func ExportCodelab(src string, rt http.RoundTripper, opts CmdExportOptions) (*types.Meta, error) {
+	f, err := fetch.NewFetcher(opts.AuthToken, opts.PassMetadata, rt)
 	if err != nil {
 		return nil, err
 	}
-	var client *http.Client // need for downloadImages
-	if clab.typ == srcGoogleDoc {
-		client, err = driveClient(opts.AuthToken)
-		if err != nil {
-			return nil, err
-		}
+	clab, err := f.SlurpCodelab(src, opts.Output)
+	if err != nil {
+		return nil, err
 	}
 
 	// codelab export context
-	lastmod := types.ContextTime(clab.mod)
+	lastmod := types.ContextTime(clab.Mod)
 	clab.Meta.Source = src
+	meta := &clab.Meta
+
+	dir := opts.Output // output dir or stdout
+	if !isStdout(dir) {
+		dir = codelabDir(dir, meta)
+	}
+	// write codelab and its metadata to disk
+	return meta, writeCodelab(dir, clab.Codelab, opts.ExtraVars, &types.Context{
+		Env:     opts.Expenv,
+		Format:  opts.Tmplout,
+		Prefix:  opts.Prefix,
+		MainGA:  opts.GlobalGA,
+		Updated: &lastmod,
+	})
+}
+
+func ExportCodelabMemory(src io.ReadCloser, w io.Writer, opts CmdExportOptions) (*types.Meta, error) {
+	m := fetch.NewMemoryFetcher(opts.PassMetadata)
+	clab, err := m.SlurpCodelab(src)
+	if err != nil {
+		return nil, err
+	}
+
+	// codelab export context
+	lastmod := types.ContextTime(clab.Mod)
 	meta := &clab.Meta
 	ctx := &types.Context{
 		Env:     opts.Expenv,
@@ -115,17 +144,33 @@ func exportCodelab(src string, opts CmdExportOptions) (*types.Meta, error) {
 		Updated: &lastmod,
 	}
 
-	dir := opts.Output // output dir or stdout
-	if !isStdout(dir) {
-		dir = codelabDir(dir, meta)
-		// download or copy codelab assets to disk, and rewrite image URLs
-		mdir := filepath.Join(dir, imgDirname)
-		if _, err := slurpImages(client, src, mdir, clab.Steps); err != nil {
-			return nil, err
-		}
+	return meta, writeCodelabWriter(w, clab.Codelab, opts.ExtraVars, ctx)
+}
+
+func writeCodelabWriter(w io.Writer, clab *types.Codelab, extraVars map[string]string, ctx *types.Context) error {
+	// main content file(s)
+	data := &struct {
+		render.Context
+		Current *types.Step
+		StepNum int
+		Prev    bool
+		Next    bool
+	}{Context: render.Context{
+		Env:      ctx.Env,
+		Prefix:   ctx.Prefix,
+		Format:   ctx.Format,
+		GlobalGA: ctx.MainGA,
+		Updated:  time.Time(*ctx.Updated).Format(time.RFC3339),
+		Meta:     &clab.Meta,
+		Steps:    clab.Steps,
+		Extra:    extraVars,
+	}}
+
+	if ctx.Format == "offline" {
+		return errors.New("exporting codelab offline is not supported for In-Memory Export")
 	}
-	// write codelab and its metadata to disk
-	return meta, writeCodelab(dir, clab.Codelab, opts.ExtraVars, ctx)
+
+	return render.Execute(w, ctx.Format, data)
 }
 
 // writeCodelab stores codelab main content in ctx.Format and its metadata
@@ -156,6 +201,7 @@ func writeCodelab(dir string, clab *types.Codelab, extraVars map[string]string, 
 	}{Context: render.Context{
 		Env:      ctx.Env,
 		Prefix:   ctx.Prefix,
+		Format:   ctx.Format,
 		GlobalGA: ctx.MainGA,
 		Updated:  time.Time(*ctx.Updated).Format(time.RFC3339),
 		Meta:     &clab.Meta,
@@ -203,103 +249,6 @@ func writeCodelab(dir string, clab *types.Codelab, extraVars map[string]string, 
 	return nil
 }
 
-func slurpImages(client *http.Client, src, dir string, steps []*types.Step) (map[string]string, error) {
-	// make sure img dir exists
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
-	}
-
-	type res struct {
-		url, file string
-		err       error
-	}
-
-	ch := make(chan *res, 100)
-	defer close(ch)
-	var count int
-	for _, st := range steps {
-		nodes := imageNodes(st.Content.Nodes)
-		count += len(nodes)
-		for _, n := range nodes {
-			go func(n *types.ImageNode) {
-				url := n.Src
-				file, err := slurpBytes(client, src, dir, url)
-				if err == nil {
-					n.Src = filepath.Join(imgDirname, file)
-				}
-				ch <- &res{url, file, err}
-			}(n)
-		}
-	}
-
-	var err error
-	imap := make(map[string]string, count)
-	for i := 0; i < count; i++ {
-		r := <-ch
-		imap[r.file] = r.url
-		if r.err != nil && err == nil {
-			// record first error
-			err = fmt.Errorf("%s => %s: %v", r.url, r.file, r.err)
-		}
-	}
-
-	return imap, err
-}
-
-// imageNodes filters out everything except types.NodeImage nodes, recursively.
-func imageNodes(nodes []types.Node) []*types.ImageNode {
-	var imgs []*types.ImageNode
-	for _, n := range nodes {
-		switch n := n.(type) {
-		case *types.ImageNode:
-			imgs = append(imgs, n)
-		case *types.ListNode:
-			imgs = append(imgs, imageNodes(n.Nodes)...)
-		case *types.ItemsListNode:
-			for _, i := range n.Items {
-				imgs = append(imgs, imageNodes(i.Nodes)...)
-			}
-		case *types.HeaderNode:
-			imgs = append(imgs, imageNodes(n.Content.Nodes)...)
-		case *types.URLNode:
-			imgs = append(imgs, imageNodes(n.Content.Nodes)...)
-		case *types.ButtonNode:
-			imgs = append(imgs, imageNodes(n.Content.Nodes)...)
-		case *types.InfoboxNode:
-			imgs = append(imgs, imageNodes(n.Content.Nodes)...)
-		case *types.GridNode:
-			for _, r := range n.Rows {
-				for _, c := range r {
-					imgs = append(imgs, imageNodes(c.Content.Nodes)...)
-				}
-			}
-		}
-	}
-	return imgs
-}
-
-// importNodes filters out everything except types.NodeImport nodes, recursively.
-func importNodes(nodes []types.Node) []*types.ImportNode {
-	var imps []*types.ImportNode
-	for _, n := range nodes {
-		switch n := n.(type) {
-		case *types.ImportNode:
-			imps = append(imps, n)
-		case *types.ListNode:
-			imps = append(imps, importNodes(n.Nodes)...)
-		case *types.InfoboxNode:
-			imps = append(imps, importNodes(n.Content.Nodes)...)
-		case *types.GridNode:
-			for _, r := range n.Rows {
-				for _, c := range r {
-					imps = append(imps, importNodes(c.Content.Nodes)...)
-				}
-			}
-		}
-	}
-	return imps
-}
-
 // writeMeta writes codelab metadata to a local disk location
 // specified by path.
 func writeMeta(path string, cm *types.ContextMeta) error {
@@ -312,10 +261,4 @@ func writeMeta(path string, cm *types.ContextMeta) error {
 	}
 	b = append(b, '\n')
 	return ioutil.WriteFile(path, b, 0644)
-}
-
-// codelabDir returns codelab root directory.
-// The base argument is codelab parent directory.
-func codelabDir(base string, m *types.Meta) string {
-	return filepath.Join(base, m.ID)
 }

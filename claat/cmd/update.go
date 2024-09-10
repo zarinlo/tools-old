@@ -1,4 +1,4 @@
-// Copyright 2016 Google Inc. All Rights Reserved.
+// Copyright 2016-2019 Google LLC. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/googlecodelabs/tools/claat/fetch"
 	"github.com/googlecodelabs/tools/claat/types"
 	"github.com/googlecodelabs/tools/claat/util"
 )
@@ -39,6 +39,8 @@ type CmdUpdateOptions struct {
 	ExtraVars map[string]string
 	// GlobalGA is the global Google Analytics account to use.
 	GlobalGA string
+	// PassMetadata are the extra metadata fields to pass along.
+	PassMetadata map[string]bool
 	// Prefix is a URL prefix to prepend when using HTML format.
 	Prefix string
 }
@@ -105,29 +107,20 @@ func updateCodelab(dir string, opts CmdUpdateOptions) (*types.Meta, error) {
 	}
 
 	// fetch and parse codelab source
-	clab, err := slurpCodelab(meta.Source, opts.AuthToken)
+	f, err := fetch.NewFetcher(opts.AuthToken, opts.PassMetadata, nil)
 	if err != nil {
 		return nil, err
 	}
-	updated := types.ContextTime(clab.mod)
+	basedir := filepath.Join(dir, "..")
+	clab, err := f.SlurpCodelab(meta.Source, basedir)
+	if err != nil {
+		return nil, err
+	}
+	updated := types.ContextTime(clab.Mod)
 	meta.Context.Updated = &updated
 
-	basedir := filepath.Join(dir, "..")
 	newdir := codelabDir(basedir, &clab.Meta)
-	imgdir := filepath.Join(newdir, imgDirname)
-
-	// slurp codelab assets to disk and rewrite image URLs
-	var client *http.Client
-	if clab.typ == srcGoogleDoc {
-		client, err = driveClient(opts.AuthToken)
-		if err != nil {
-			return nil, err
-		}
-	}
-	imgmap, err := slurpImages(client, meta.Source, imgdir, clab.Steps)
-	if err != nil {
-		return nil, err
-	}
+	imgdir := filepath.Join(newdir, util.ImgDirname)
 
 	// write codelab and its metadata
 	if err := writeCodelab(newdir, clab.Codelab, opts.ExtraVars, &meta.Context); err != nil {
@@ -148,7 +141,7 @@ func updateCodelab(dir string, opts CmdUpdateOptions) (*types.Meta, error) {
 		if fi.IsDir() {
 			return filepath.SkipDir
 		}
-		if _, ok := imgmap[filepath.Base(p)]; !ok {
+		if _, ok := clab.Imgs[filepath.Base(p)]; !ok {
 			return os.Remove(p)
 		}
 		return nil

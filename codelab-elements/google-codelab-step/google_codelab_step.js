@@ -18,9 +18,12 @@
 goog.module('googlecodelabs.CodelabStep');
 
 const EventHandler = goog.require('goog.events.EventHandler');
+const HtmlSanitizer = goog.require('goog.html.sanitizer.HtmlSanitizer');
 const Templates = goog.require('googlecodelabs.CodelabStep.Templates');
 const dom = goog.require('goog.dom');
+const safe = goog.require('goog.dom.safe');
 const soy = goog.require('goog.soy');
+const {identity} = goog.require('goog.functions');
 
 /** @const {string} */
 const LABEL_ATTR = 'label';
@@ -59,9 +62,9 @@ class CodelabStep extends HTMLElement {
     this.hasSetup_ = false;
 
     /**
-     * @private {string}
+     * @private {number}
      */
-    this.step_ = '0';
+    this.step_ = 0;
 
     /**
      * @private {string}
@@ -94,6 +97,12 @@ class CodelabStep extends HTMLElement {
   }
 
   /**
+   * @export
+   * @override
+   */
+  disconnectedCallback() {}
+
+  /**
    * @return {!Array<string>}
    * @export
    */
@@ -124,7 +133,7 @@ class CodelabStep extends HTMLElement {
     }
 
     if (this.hasAttribute(STEP_ATTR)) {
-      this.step_ = this.getAttribute(STEP_ATTR);
+      this.step_ = parseInt(this.getAttribute(STEP_ATTR) || '', 10);
     }
 
     if (!this.title_) {
@@ -148,6 +157,8 @@ class CodelabStep extends HTMLElement {
       return;
     }
 
+    this.setAttribute('tabindex', '-1');
+
     // If there is an google-codelab-about element we keep it aside.
     const aboutElements = this.getElementsByTagName('google-codelab-about');
     if (aboutElements.length > 0) {
@@ -164,11 +175,15 @@ class CodelabStep extends HTMLElement {
     dom.appendChild(this.instructions_, this.inner_);
     dom.removeChildren(this);
 
-    // Generate the title using a soy template.
-    const title = soy.renderAsElement(Templates.title, {
-      step: this.step_,
-      label: this.label_,
-    });
+    // Get the rendered title.
+    let title = this.inner_.querySelector('.step-title');
+    if (!title) {
+      // Generate the title using a soy template.
+      title = soy.renderAsElement(Templates.title, {
+        step: this.step_,
+        label: this.label_,
+      });
+    }
     this.title_ = title;
 
     // Inject the title in the containers.
@@ -177,8 +192,15 @@ class CodelabStep extends HTMLElement {
     // Add prettyprint to code blocks.
     const codeElements = this.inner_.querySelectorAll('pre code');
     codeElements.forEach((el) => {
-      const code = window['prettyPrintOne'](el.innerHTML);
-      el.innerHTML = code;
+      if (window['prettyPrintOne'] instanceof Function) {
+        const code = window['prettyPrintOne'](el.innerHTML);
+        // Sanitizer that preserves class names for syntax highlighting.
+        const sanitizer =
+            new HtmlSanitizer.Builder().withCustomTokenPolicy(identity).build();
+        safe.setInnerHtml(el, sanitizer.sanitize(code));
+      } else {
+        el.classList.add('prettyprint');
+      }
       this.eventHandler_.listen(
         el, 'copy', () => this.handleSnippetCopy_(el));
     });

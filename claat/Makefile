@@ -25,7 +25,11 @@ RELEASES=$(OUTDIR)/claat-darwin-amd64 \
 	 $(OUTDIR)/claat-windows-amd64.exe \
 	 $(OUTDIR)/claat-windows-386.exe
 
-SRCS = $(shell find . -name '*.go') render/tmpldata.go
+ifeq ($(OS), Windows_NT)
+		SRCS = $(shell dir *.go /b/s) 
+	else
+		SRCS = $(shell find . -name '*.go') 
+endif
 
 all: $(OUTDIR)/claat
 
@@ -44,17 +48,8 @@ release: $(RELEASES)
 	echo $(VERSION) > $(OUTDIR)/VERSION
 	cd $(OUTDIR) && sha1sum claat* > sha1sum.txt
 
-test: .test
-.test: $(SRCS)
-	go test ./... && touch .test
-
-lint: .lint
-.lint: $(SRCS)
-	go vet ./...
-	golint ./... && touch .lint
-
 clean:
-	rm -rf $(OUTDIR) render/tmpldata.go .test .lint
+	rm -rf $(OUTDIR) render/tmpldata.go 
 
 $(OUTDIR)/claat-%: GOOS=$(firstword $(subst -, ,$*))
 $(OUTDIR)/claat-%: GOARCH=$(subst .exe,,$(word 2,$(subst -, ,$*)))

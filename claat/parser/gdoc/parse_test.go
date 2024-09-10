@@ -16,6 +16,7 @@ package gdoc
 
 import (
 	"bytes"
+	"encoding/base64"
 	"io"
 	"reflect"
 	"strings"
@@ -24,6 +25,8 @@ import (
 
 	"golang.org/x/net/html"
 
+	"github.com/googlecodelabs/tools/claat/nodes"
+	"github.com/googlecodelabs/tools/claat/parser"
 	"github.com/googlecodelabs/tools/claat/render"
 	"github.com/googlecodelabs/tools/claat/types"
 )
@@ -39,24 +42,6 @@ func trimMarkupSpace(s string) string {
 func markupReader(s string) io.Reader {
 	s = trimMarkupSpace(s)
 	return strings.NewReader(s)
-}
-
-func TestStringSlice(t *testing.T) {
-	tests := []struct {
-		in  string
-		out []string
-	}{
-		{"one", []string{"one"}},
-		{" two ", []string{"two"}},
-		{" one, two", []string{"one", "two"}},
-		{" one, two and a half, three", []string{"one", "two and a half", "three"}},
-	}
-	for i, test := range tests {
-		v := stringSlice(test.in)
-		if !reflect.DeepEqual(v, test.out) {
-			t.Errorf("%d: stringSlice(%q): %v; want %v", i, test.in, v, test.out)
-		}
-	}
 }
 
 func TestParseStepDuration(t *testing.T) {
@@ -77,7 +62,7 @@ func TestParseStepDuration(t *testing.T) {
 			t.Errorf("%d: Parse(%q): %v", i, test.markup, err)
 		}
 		ds := &docState{
-			step: &types.Step{Content: types.NewListNode()},
+			step: &types.Step{Content: nodes.NewListNode()},
 			css:  cssStyle{".c9": {"color": metaColor}},
 			cur:  doc.FirstChild,
 		}
@@ -108,16 +93,17 @@ func TestParseTopCodeBlock(t *testing.T) {
 
 	code := "start func() {\n}\n\nfunc2() {\n} // comment"
 	term := "adb shell am start -a VIEW \\\n-d \"http://host\" app"
-	content := types.NewListNode()
-	content.Append(types.NewCodeNode(code, false))
-	content.Append(types.NewCodeNode(term, true))
+	content := nodes.NewListNode()
+	var lang string
+	content.Append(nodes.NewCodeNode(code, false, lang))
+	content.Append(nodes.NewCodeNode(term, true, lang))
 
 	doc, err := html.Parse(markupReader(markup))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ds := &docState{
-		step: &types.Step{Content: types.NewListNode()},
+		step: &types.Step{Content: nodes.NewListNode()},
 		css: cssStyle{
 			".code": {"font-family": fontCode},
 			".term": {"font-family": fontConsole},
@@ -125,9 +111,9 @@ func TestParseTopCodeBlock(t *testing.T) {
 		cur: doc.FirstChild,
 	}
 	parseTop(ds)
-
-	html1, _ := render.HTML("", ds.step.Content)
-	html2, _ := render.HTML("", content)
+	var ctx render.Context
+	html1, _ := render.HTML(ctx, ds.step.Content)
+	html2, _ := render.HTML(ctx, content)
 	s1 := strings.TrimSpace(string(html1))
 	s2 := strings.TrimSpace(string(html2))
 	if s1 != s2 {
@@ -174,14 +160,95 @@ func TestMetaTable(t *testing.T) {
 	`
 
 	p := &Parser{}
-	clab, err := p.Parse(markupReader(markup))
+	clab, err := p.Parse(markupReader(markup), *parser.NewOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
 	meta := types.Meta{
 		Summary:    "Test summary",
 		Authors:    "John Smith <user@example.com>",
-		Categories: []string{"Foo", "Bar"},
+		Categories: []string{"foo", "bar"},
+		Theme:      "foo",
+		Status:     clab.Meta.Status, // verified separately
+		Feedback:   "https://example.com/issues",
+		GA:         "GA-12345",
+		// Tags are always sorted.
+		// TODO: move sorting to Parse of the parser package
+		Tags:  []string{"kiosk", "web"},
+		Extra: map[string]string{},
+	}
+	if !reflect.DeepEqual(clab.Meta, meta) {
+		t.Errorf("Meta: \n%+v\nwant:\n%+v", clab.Meta, meta)
+	}
+	status := types.LegacyStatus([]string{"final"})
+	if clab.Meta.Status == nil {
+		t.Fatalf("Meta.Status is nil; want %q", status)
+	}
+	if !reflect.DeepEqual(clab.Meta.Status, &status) {
+		t.Errorf("Meta.Status: %q; want %q", *clab.Meta.Status, status)
+	}
+}
+
+func TestMetaTablePassMetadata(t *testing.T) {
+	const markup = `
+	<html>
+	<body>
+		<table>
+			<tr>
+				<td>Summary</td>
+				<td>Test summary</td>
+			</tr>
+			<tr>
+				<td>Authors</td>
+				<td>John Smith &lt;user@example.com&gt;</td>
+			</tr>
+			<tr>
+				<td>Category</td>
+				<td>Foo, Bar</td>
+			</tr>
+			<tr>
+				<td>Environment</td>
+				<td>Web, Kiosk</td>
+			</tr>
+			<tr>
+				<td>Status</td>
+				<td>Final</td>
+			</tr>
+			<tr>
+				<td>Feedback Link</td>
+				<td>https://example.com/issues</td>
+			</tr>
+			<tr>
+				<td>Analytics</td>
+				<td>GA-12345</td>
+			</tr>
+			<tr>
+				<td>ExtraFieldOne</td>
+				<td>11111</td>
+			</tr>
+			<tr>
+				<td>ExtraFieldTwo</td>
+				<td>22222</td>
+			</tr>
+		</table>
+	</body>
+	</html>
+	`
+
+	p := &Parser{}
+	opts := *parser.NewOptions()
+	opts.PassMetadata = map[string]bool{
+		"extra_field_one": true,
+	}
+
+	clab, err := p.Parse(markupReader(markup), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := types.Meta{
+		Summary:    "Test summary",
+		Authors:    "John Smith <user@example.com>",
+		Categories: []string{"foo", "bar"},
 		Theme:      "foo",
 		Status:     clab.Meta.Status, // verified separately
 		Feedback:   "https://example.com/issues",
@@ -189,6 +256,9 @@ func TestMetaTable(t *testing.T) {
 		// Tags are always sorted.
 		// TODO: move sorting to Parse of the parser package
 		Tags: []string{"kiosk", "web"},
+		Extra: map[string]string{
+			"extra_field_one": "11111",
+		},
 	}
 	if !reflect.DeepEqual(clab.Meta, meta) {
 		t.Errorf("Meta: \n%+v\nwant:\n%+v", clab.Meta, meta)
@@ -226,6 +296,9 @@ func TestParseDoc(t *testing.T) {
 		<p><span>[[</span><span class="bold">import</span><span>&nbsp;</span><span><a href="https://example.com/import">shared</a></span><span>]]</span></p>
 
 		<img src="https://host/image.png" alt="alt text" title="title text">
+		<p><img alt="JPEG" src="data:image/jpeg;base64,/9j/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAA//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AN//Z"></p>
+		<p><img alt="GIF" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></p>
+		<p><img alt="PNG" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQYV2NgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII="></p>
 		<p><img src="https://host/small.png" style="height: 10px; width: 25.5px"> icon.</p>
 
 		<p><img alt="https://www.youtube.com/watch?v=vid" src="https://yt.com/vid.jpg"></p>
@@ -293,7 +366,7 @@ func TestParseDoc(t *testing.T) {
 	`
 
 	p := &Parser{}
-	c, err := p.Parse(markupReader(markup))
+	c, err := p.Parse(markupReader(markup), *parser.NewOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,9 +387,9 @@ func TestParseDoc(t *testing.T) {
 		t.Fatal("step.Content.Nodes is empty")
 	}
 	want := "https://example.com/import"
-	in, ok := step.Content.Nodes[0].(*types.ImportNode)
+	in, ok := step.Content.Nodes[0].(*nodes.ImportNode)
 	if !ok {
-		t.Errorf("step.Content.Nodes[0] = %+v; want types.ImportNode", step.Content.Nodes[0])
+		t.Errorf("step.Content.Nodes[0] = %+v; want nodes.ImportNode", step.Content.Nodes[0])
 	}
 	if ok && in.URL != want {
 		t.Errorf("in.URL = %q; want %q", in.URL, want)
@@ -325,119 +398,154 @@ func TestParseDoc(t *testing.T) {
 		t.Errorf("in.Block = %+v (%T); want nil", in.Block(), in.Block())
 	}
 
-	content := types.NewListNode()
+	content := nodes.NewListNode()
 
-	img := types.NewImageNode("https://host/image.png")
-	img.Alt = "alt text"
-	img.Title = "title text"
-	para := types.NewListNode(img)
+	img := nodes.NewImageNode(nodes.NewImageNodeOptions{
+		Src:   "https://host/image.png",
+		Alt:   "alt text",
+		Title: "title text",
+	})
+	para := nodes.NewListNode(img)
 	para.MutateBlock(true)
 	content.Append(para)
 
-	img = types.NewImageNode("https://host/small.png")
-	img.Width = 25.5
-	para = types.NewListNode(img, types.NewTextNode(" icon."))
+	bytes, _ := base64.StdEncoding.DecodeString("/9j/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAA//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AN//Z")
+	img = nodes.NewImageNode(nodes.NewImageNodeOptions{
+		Bytes: bytes,
+		Alt:   "JPEG",
+	})
+	para = nodes.NewListNode(img)
 	para.MutateBlock(true)
 	content.Append(para)
 
-	yt := types.NewYouTubeNode("vid")
+	bytes, _ = base64.StdEncoding.DecodeString("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+	img = nodes.NewImageNode(nodes.NewImageNodeOptions{
+		Bytes: bytes,
+		Alt:   "GIF",
+	})
+	para = nodes.NewListNode(img)
+	para.MutateBlock(true)
+	content.Append(para)
+
+	bytes, _ = base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQYV2NgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=")
+	img = nodes.NewImageNode(nodes.NewImageNodeOptions{
+		Bytes: bytes,
+		Alt:   "PNG",
+	})
+	para = nodes.NewListNode(img)
+	para.MutateBlock(true)
+	content.Append(para)
+
+	img = nodes.NewImageNode(nodes.NewImageNodeOptions{
+		Src:   "https://host/small.png",
+		Width: 25.5,
+	})
+	para = nodes.NewListNode(img, nodes.NewTextNode(nodes.NewTextNodeOptions{Value: " icon."}))
+	para.MutateBlock(true)
+	content.Append(para)
+
+	yt := nodes.NewYouTubeNode("vid")
 	yt.MutateBlock(true)
 	content.Append(yt)
 
-	iframe := types.NewIframeNode("https://repl.it/?foo=bar")
+	iframe := nodes.NewIframeNode("https://repl.it/?foo=bar")
 	iframe.MutateBlock(true)
 	content.Append(iframe)
 
-	img = types.NewImageNode("https://host/image.png")
-	img.Alt = "The domain of the requested iframe (example.com) has not been whitelisted."
-	para = types.NewListNode(img)
+	img = nodes.NewImageNode(nodes.NewImageNodeOptions{
+		Src: "https://host/image.png",
+		Alt: "The domain of the requested iframe (example.com) has not been whitelisted.",
+	})
+	para = nodes.NewListNode(img)
 	para.MutateBlock(true)
 	content.Append(para)
 
-	h := types.NewHeaderNode(3, types.NewTextNode("What you'll learn"))
-	h.MutateType(types.NodeHeaderCheck)
+	h := nodes.NewHeaderNode(3, nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "What you'll learn"}))
+	h.MutateType(nodes.NodeHeaderCheck)
 	content.Append(h)
-	list := types.NewItemsListNode("", 0)
-	list.MutateType(types.NodeItemsCheck)
-	list.NewItem().Append(types.NewTextNode("First One"))
+	list := nodes.NewItemsListNode("", 0)
+	list.MutateType(nodes.NodeItemsCheck)
+	list.NewItem().Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "First One"}))
 	item := list.NewItem()
-	item.Append(types.NewTextNode("Two "))
-	item.Append(types.NewURLNode("http://example.com", types.NewTextNode("Link")))
-	list.NewItem().Append(types.NewTextNode("Three"))
+	item.Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Two "}))
+	item.Append(nodes.NewURLNode("http://example.com", nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Link"})))
+	list.NewItem().Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Three"}))
 	content.Append(list)
 
-	para = types.NewListNode()
+	para = nodes.NewListNode()
 	para.MutateBlock(true)
-	para.Append(types.NewTextNode("This is "))
-	txt := types.NewTextNode("code")
+	para.Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "This is "}))
+	txt := nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "code"})
 	txt.Code = true
 	para.Append(txt)
-	para.Append(types.NewTextNode("."))
+	para.Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "."}))
 	content.Append(para)
 
-	para = types.NewListNode()
+	para = nodes.NewListNode()
 	para.MutateBlock(true)
-	para.Append(types.NewTextNode("Just a paragraph."))
+	para.Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Just a paragraph."}))
 	content.Append(para)
 
-	u := types.NewURLNode("url", types.NewTextNode("one url"))
-	para = types.NewListNode(u)
-	para.MutateBlock(true)
-	content.Append(para)
-
-	btn := types.NewButtonNode(true, true, true, types.NewTextNode("Download Zip"))
-	dl := types.NewURLNode("http://example.com", btn)
-	para = types.NewListNode(dl)
+	u := nodes.NewURLNode("url", nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "one url"}))
+	para = nodes.NewListNode(u)
 	para.MutateBlock(true)
 	content.Append(para)
 
-	b := types.NewTextNode("Bo ld")
+	btn := nodes.NewButtonNode(true, true, true, nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Download Zip"}))
+	dl := nodes.NewURLNode("http://example.com", btn)
+	para = nodes.NewListNode(dl)
+	para.MutateBlock(true)
+	content.Append(para)
+
+	b := nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Bo ld"})
 	b.Bold = true
-	i := types.NewTextNode(" italic")
+	i := nodes.NewTextNode(nodes.NewTextNodeOptions{Value: " italic"})
 	i.Italic = true
-	bi := types.NewTextNode("or both.")
+	bi := nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "or both."})
 	bi.Bold = true
 	bi.Italic = true
-	para = types.NewListNode(b, i, types.NewTextNode(" text "), bi)
+	para = nodes.NewListNode(b, i, nodes.NewTextNode(nodes.NewTextNodeOptions{Value: " text "}), bi)
 	para.MutateBlock(true)
 	content.Append(para)
 
-	h = types.NewHeaderNode(3, types.NewURLNode(
-		"http://host/file.java", types.NewTextNode("a file")))
+	h = nodes.NewHeaderNode(3, nodes.NewURLNode(
+		"http://host/file.java", nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "a file"})))
 	content.Append(h)
 
+	var lang string
 	code := "start func() {\n}\n\nfunc2() {\n} // comment"
-	cn := types.NewCodeNode(code, false)
+	cn := nodes.NewCodeNode(code, false, lang)
 	cn.MutateBlock(1)
 	content.Append(cn)
 
 	term := "adb shell am start -a VIEW \\\n-d \"http://host\" app"
-	tn := types.NewCodeNode(term, true)
+	tn := nodes.NewCodeNode(term, true, lang)
 	tn.MutateBlock(2)
 	content.Append(tn)
 
-	b = types.NewTextNode("warning")
+	b = nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "warning"})
 	b.Bold = true
-	n1 := types.NewListNode(b)
+	n1 := nodes.NewListNode(b)
 	n1.MutateBlock(true)
-	n2 := types.NewListNode(types.NewTextNode("negative box."))
+	n2 := nodes.NewListNode(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "negative box."}))
 	n2.MutateBlock(true)
-	box := types.NewInfoboxNode(types.InfoboxNegative, n1, n2)
+	box := nodes.NewInfoboxNode(nodes.InfoboxNegative, n1, n2)
 	content.Append(box)
 
-	sv := types.NewSurveyNode("test-codelab-1")
-	sv.Groups = append(sv.Groups, &types.SurveyGroup{
+	sv := nodes.NewSurveyNode("test-codelab-1")
+	sv.Groups = append(sv.Groups, &nodes.SurveyGroup{
 		Name:    "How will you use it?",
 		Options: []string{"Read it", "Read and complete"},
 	})
-	sv.Groups = append(sv.Groups, &types.SurveyGroup{
+	sv.Groups = append(sv.Groups, &nodes.SurveyGroup{
 		Name:    "How would you rate?",
 		Options: []string{"Novice", "Intermediate", "Proficient"},
 	})
 	content.Append(sv)
 
-	html1, _ := render.HTML("", step.Content)
-	html2, _ := render.HTML("", content)
+	var ctx render.Context
+	html1, _ := render.HTML(ctx, step.Content)
+	html2, _ := render.HTML(ctx, content)
 	if html1 != html2 {
 		t.Errorf("step.Content:\n\n%s\nwant:\n\n%s", html1, html2)
 	}
@@ -459,7 +567,8 @@ func TestParseFragment(t *testing.T) {
 	<body>
 		<p class="title"><a name="a1"></a><span>Test Codelab</span></p>
 		<p>this should not be ignored</p>
-		<img src="https://host/image.png">
+		<p><img src="https://host/image.png"></p>
+		<span class="c17 c7"><a class="c11" href="https://www.google.com/url?q=https://www.example.com/%2B/test;l%3D68&amp;sa=D">Test redirector.</a></span>
 		<div class="comment">
 		<p><a href="#cmnt_ref1" name="cmnt1">[a]</a><span class="c16 c8">Test comment.</span></p>
 		</div>
@@ -468,30 +577,40 @@ func TestParseFragment(t *testing.T) {
 	`
 
 	p := &Parser{}
-	nodes, err := p.ParseFragment(markupReader(markup))
+	opts := *parser.NewOptions()
+	fragmentNodes, err := p.ParseFragment(markupReader(markup), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var want []types.Node
+	var want []nodes.Node
 
-	para := types.NewListNode()
+	para := nodes.NewListNode()
 	para.MutateBlock(true)
-	para.Append(types.NewTextNode("Test Codelab"))
+	para.Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "Test Codelab"}))
 	want = append(want, para)
 
-	para = types.NewListNode()
+	para = nodes.NewListNode()
 	para.MutateBlock(true)
-	para.Append(types.NewTextNode("this should not be ignored"))
+	para.Append(nodes.NewTextNode(nodes.NewTextNodeOptions{Value: "this should not be ignored"}))
 	want = append(want, para)
 
-	img := types.NewImageNode("https://host/image.png")
-	para = types.NewListNode(img)
+	img := nodes.NewImageNode(nodes.NewImageNodeOptions{Src: "https://host/image.png"})
+	para = nodes.NewListNode(img)
 	para.MutateBlock(true)
 	want = append(want, para)
 
-	html1, _ := render.HTML("", nodes...)
-	html2, _ := render.HTML("", want...)
+	tn := nodes.NewTextNode(nodes.NewTextNodeOptions{
+		Value: "Test redirector.",
+	})
+	rlink := nodes.NewURLNode("https://www.example.com/+/test;l=68&sa=D", tn)
+	para = nodes.NewListNode(rlink)
+	para.MutateBlock(true)
+	want = append(want, para)
+
+	var ctx render.Context
+	html1, _ := render.HTML(ctx, fragmentNodes...)
+	html2, _ := render.HTML(ctx, want...)
 	if html1 != html2 {
 		t.Errorf("nodes:\n\n%s\nwant:\n\n%s", html1, html2)
 	}

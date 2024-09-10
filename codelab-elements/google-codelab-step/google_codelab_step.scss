@@ -32,6 +32,10 @@ $google-codelab-step-link-color: $google-material-blue-600;
 google-codelab-step {
   line-height: 24px;
   display: block;
+
+  &:focus {
+    outline: none;
+  }
 }
 
 google-codelab-step {
@@ -44,6 +48,17 @@ google-codelab-step h2.step-title {
   font-weight: 400 !important;
   line-height: 1em !important;
   margin: 0 0 30px !important;
+}
+
+google-codelab-step .step-title a {
+  color: #3C4043;
+  text-decoration: none;
+}
+
+google-codelab-step .step-title a:focus,
+google-codelab-step .step-title a:hover {
+  color: #212121;
+  text-decoration: underline;
 }
 
 google-codelab:not([theme="minimal"]) google-codelab-step .instructions {
@@ -70,8 +85,8 @@ google-codelab[theme="minimal"] google-codelab-step .instructions .inner {
   }
 }
 
-google-codelab:not([theme="minimal"]) google-codelab-step .instructions a,
-google-codelab:not([theme="minimal"]) google-codelab-step .instructions a:visited {
+google-codelab:not([theme="minimal"]) google-codelab-step .instructions :not(.step-title) > a,
+google-codelab:not([theme="minimal"]) google-codelab-step .instructions :not(.step-title) > a:visited {
   color: $google-codelab-step-link-color;
 }
 
@@ -103,6 +118,7 @@ google-codelab:not([theme="minimal"]) google-codelab-step .instructions h2 {
 }
 
 google-codelab:not([theme="minimal"]) google-codelab-step .instructions h3 {
+  font-size: 16px;
   font-weight: 500;
   margin: 20px 0 0 0;
 }
@@ -158,8 +174,7 @@ google-codelab-step .instructions ul.checklist {
   padding: 0 0 0 1em;
 }
 
-google-codelab-step .instructions ul.checklist li,
-google-codelab-step .instructions ::content ul.checklist li {
+google-codelab-step .instructions ul.checklist li {
   padding-left: 24px;
   background-size: 20px;
   background-repeat: no-repeat;
@@ -223,6 +238,24 @@ google-codelab-step .instructions iron-icon {
   margin-right: 7px;
   margin-left: 3px;
   font-size: 16px;
+  top: -1px;
+  position: relative;
+}
+
+iron-icon {
+  font: normal normal normal 24px/1 "Material Icons";
+  -webkit-font-feature-settings: "liga";
+  font-feature-settings: "liga";
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  text-transform: none;
+  word-wrap: normal;
+  font-size: inherit;
+}
+
+iron-icon[icon=file-download]::after {
+  content: "cloud_download";
 }
 
 google-codelab-step .instructions img {
