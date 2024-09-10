@@ -1,14 +1,15 @@
 {
   "environment": "web",
-  "source": "how-to-write-a-codelab.md",
   "format": "html",
-  "prefix": "../../",
+  "prefix": "https://storage.googleapis.com",
   "mainga": "UA-49880327-14",
-  "updated": "2019-07-11T01:03:49-04:00",
+  "updated": "2024-09-09T21:53:59-04:00",
   "id": "how-to-write-a-codelab",
   "duration": 7,
   "title": "How to Write a Codelab",
+  "authors": "Zarin",
   "summary": "How to Write a Codelab",
+  "source": "how-to-write-a-codelab.md",
   "theme": "",
   "status": [
     "published"
